@@ -35,8 +35,7 @@ async function run() {
     });
 
     const verifyToken = async (req, res, next) => {
-      const authorization = req.headers.authorization;
-      console.log(authorization);
+      const authorization = await req.headers.authorization;
       if (!authorization) {
         return res.status(401).send({ message: "unauthorized access" });
       }
@@ -55,7 +54,6 @@ async function run() {
     const verifyAdmin = async (req, res, next) => {
       const email = req.decoded.email;
       const query = { email: email };
-      console.log(query);
       const user = await userCollection.findOne(query);
       const isAdmin = user?.role === "admin";
       if (!isAdmin) {
@@ -79,7 +77,7 @@ async function run() {
       res.send({ admin });
     });
 
-    app.post("/events", async (req, res) => {
+    app.post("/events", verifyToken, verifyAdmin, async (req, res) => {
       const event = req.body;
       const result = await eventCollection.insertOne(event);
       res.send(result);
@@ -90,28 +88,36 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/events/:id", async (req, res) => {
+    app.get("/events/:id", verifyToken,  async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      console.log(query);
+      const result = await eventCollection.findOne(query);
+      res.send(result);
+    });
+
+    app.get("/event/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await eventCollection.findOne(query);
       res.send(result);
     });
 
-    app.delete("/event/:id", async (req, res) => {
+    app.delete("/event/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await eventCollection.deleteOne(query);
       res.send(result);
     });
 
-    app.patch("/events/:id", async (req, res) => {
+    app.patch("/events/:id", verifyToken, verifyAdmin, async (req, res) => {
       const data = req.body;
       const eventId = req.params.id;
       const filter = { _id: new ObjectId(eventId) };
       const updatedDoc = {
         $set: {
           title: data.title,
-          description: data.title,
+          description: data.description,
           date: data.date,
           location: data.location,
           eventTime: data.eventTime,
@@ -137,31 +143,36 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/users", verifyToken,verifyAdmin, async (req, res) => {
+    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result);
     });
 
-    app.delete("/user/:id", async (req, res) => {
+    app.delete("/user/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await userCollection.deleteOne(query);
       res.send(result);
     });
 
-    app.patch("/user/make-admin/:id", async (req, res) => {
-      const id = req.params.id;
-      const filter = { _id: new ObjectId(id) };
-      const updatedAdmin = {
-        $set: {
-          role: "admin",
-        },
-      };
-      const result = await userCollection.updateOne(filter, updatedAdmin);
-      res.send(result);
-    });
+    app.patch(
+      "/user/make-admin/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+        const updatedAdmin = {
+          $set: {
+            role: "admin",
+          },
+        };
+        const result = await userCollection.updateOne(filter, updatedAdmin);
+        res.send(result);
+      }
+    );
 
-    app.post("/gallery", async (req, res) => {
+    app.post("/gallery", verifyToken, verifyAdmin, async (req, res) => {
       const eventGallery = req.body;
       const result = await galleryCollection.insertOne(eventGallery);
       res.send(result);
@@ -172,11 +183,48 @@ async function run() {
       res.send(result);
     });
 
-    app.delete("/gallery/:id", async (req, res) => {
+    app.get("/gallery/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await galleryCollection.findOne(query);
+      res.send(result);
+    });
+
+    app.delete("/gallery/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await galleryCollection.deleteOne(query);
       res.send(result);
+    });
+
+    app.get("/gallery-search", async (req, res) => {
+      try {
+        const { title, year } = req.query;
+        const query = {};
+
+        if (title) {
+          query.title = { $regex: title, $options: "i" }; // Case-insensitive title search
+        }
+
+        if (year) {
+          query.year = year; // Filter by year (corrected here)
+        }
+
+        // Fetch unique years for the dropdown filter
+        const eventInfo = await eventCollection
+          .find({}, { projection: { year: 1 } })
+          .toArray();
+
+        // Filter events based on query
+        const result = await galleryCollection.find(query).toArray();
+        const years = [...new Set(eventInfo.map((event) => event.year))];
+        res.send({ result, years });
+      } catch (error) {
+        console.error(error.name, error.message);
+        res
+          .status(500)
+          .send({ message: "An error occurred while fetching the gallery." });
+      }
     });
 
     // Send a ping to confirm a successful connection
