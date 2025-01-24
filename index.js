@@ -34,6 +34,51 @@ async function run() {
       res.send({ token });
     });
 
+    const verifyToken = async (req, res, next) => {
+      const authorization = req.headers.authorization;
+      console.log(authorization);
+      if (!authorization) {
+        return res.status(401).send({ message: "unauthorized access" });
+      }
+      const token = authorization.split(" ")[1];
+      if (token) {
+        jwt.verify(token, process.env.DB_SECRET_TOKEN, (err, decoded) => {
+          if (err) {
+            return res.status(401).send({ message: "unauthorized access" });
+          }
+          req.decoded = decoded;
+          next();
+        });
+      }
+    };
+
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email: email };
+      console.log(query);
+      const user = await userCollection.findOne(query);
+      const isAdmin = user?.role === "admin";
+      if (!isAdmin) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+
+    app.get("/user/admin/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      // console.log(email);
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      let admin = false;
+      if (user) {
+        admin = user?.role === "admin";
+      }
+      res.send({ admin });
+    });
+
     app.post("/events", async (req, res) => {
       const event = req.body;
       const result = await eventCollection.insertOne(event);
@@ -92,7 +137,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/users", async (req, res) => {
+    app.get("/users", verifyToken,verifyAdmin, async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result);
     });
